@@ -59,7 +59,11 @@ class SnapSelectedRoutesToNetwork(QgsProcessingAlgorithm):
             feedback.pushInfo('Error: No routes selected.')
             return results
 
-        orig_routes.setSubsetString('uniqueID IN (' + ','.join(fids) + ')')
+        orig_qry = orig_routes.subsetString()
+        if len(orig_qry) > 0:
+            orig_routes.setSubsetString('(' + orig_qry + ') AND uniqueID IN (' + ','.join(fids) + ')')
+        else:
+            orig_routes.setSubsetString('uniqueID IN (' + ','.join(fids) + ')')
         orig_routes.removeSelection()
         total_features = orig_routes.featureCount()
         if total_features == 0:
@@ -252,13 +256,16 @@ class SnapSelectedRoutesToNetwork(QgsProcessingAlgorithm):
         }
         outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)
         
+        # Clear the filter on the input layer
+        orig_routes.setSubsetString(orig_qry)
+
         return results
 
     def name(self):
-        return 'Snap selected routes to network'
+        return 'Snap Selected Vector to S-VITM Network'
 
     def displayName(self):
-        return 'Snap selected routes to network'
+        return 'Snap Selected Vector to S-VITM Network'
 
     def group(self):
         return ''
