@@ -32,6 +32,10 @@ class SnapAllRoutesToNetwork(QgsProcessingAlgorithm):
         results = {}
         outputs = {}
 
+        if 'QNEAT3' not in active_plugins:
+            feedback.pushInfo('Error: \'QNEAT3\' plugin not found. Please ensure you this installed by going to Plugins -> Manage and Install Plugins.')
+            return results
+            
         feedback.pushInfo('Preparing inputs...')
 
         network_layer = QgsProcessingUtils.mapLayerFromString(parameters['Network'], context=context)
