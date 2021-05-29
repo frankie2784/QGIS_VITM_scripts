@@ -118,7 +118,7 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
                 for j in range(len(node_list) - 1):
                     if node_list[j + 1] not in all_links_dict[node_list[j]]:
                         missing_links.append(str(node_list[j]) + '->' + str(node_list[j + 1]))
-                    elif all_links_dict[node_list[j]][node_list[j + 1]] in [-1, 1]:
+                    elif all_links_dict[node_list[j]][node_list[j + 1]] in [-1, 1, 45, 46]:
                         invalid_links.append(str(node_list[j]) + '->' + str(node_list[j + 1])+': LINKCLASS='+str(all_links_dict[node_list[j]][node_list[j + 1]]))
 
                 try:
