@@ -10,6 +10,7 @@ from qgis.core import QgsProcessingParameterVectorLayer
 from qgis.core import QgsProcessingParameterField
 from qgis.core import QgsProcessingParameterNumber
 from qgis.core import QgsProcessingParameterString
+from qgis.core import QgsProcessingParameterBoolean
 from qgis.core import QgsProcessingUtils, QgsField
 from qgis.core import QgsLineString, QgsMultiLineString
 from PyQt5.QtCore import QVariant
@@ -27,6 +28,7 @@ class SnapSelectedRoutesToNetwork(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterField('RouteIDField', 'Route ID field', type=QgsProcessingParameterField.Any, parentLayerParameterName='Routes', allowMultiple=False, defaultValue='ROUTESHTNM'))
         self.addParameter(QgsProcessingParameterNumber('Buffer', 'Search buffer (metres)', type=QgsProcessingParameterNumber.Integer, defaultValue=20))
         self.addParameter(QgsProcessingParameterNumber('Strength', 'Breadth search cost penalty (1-999), i.e. relative weight assigned to using links within buffer', type=QgsProcessingParameterNumber.Integer, minValue=1, maxValue=999, defaultValue=700))
+        self.addParameter(QgsProcessingParameterBoolean('Filter', 'Filter routes layer to selected', defaultValue=True))
 
     def processAlgorithm(self, parameters, context, model_feedback):
 
@@ -39,6 +41,7 @@ class SnapSelectedRoutesToNetwork(QgsProcessingAlgorithm):
             return results
 
         feedback.pushInfo('Preparing inputs...')
+        feedback.pushInfo('')
 
         # Original routes filter
         orig_routes = QgsProcessingUtils.mapLayerFromString(parameters['Routes'], context=context)
@@ -60,21 +63,27 @@ class SnapSelectedRoutesToNetwork(QgsProcessingAlgorithm):
             return results
 
         orig_qry = orig_routes.subsetString()
-        if len(orig_qry) > 0:
-            orig_routes.setSubsetString('(' + orig_qry + ') AND uniqueID IN (' + ','.join(fids) + ')')
+        if not parameters['Filter']:
+            if len(orig_qry) > 0:
+                orig_routes.setSubsetString('(' + orig_qry + ') AND uniqueID IN (' + ','.join(fids) + ')')
         else:
             orig_routes.setSubsetString('uniqueID IN (' + ','.join(fids) + ')')
+        
         orig_routes.removeSelection()
         total_features = orig_routes.featureCount()
+        
         if total_features == 0:
             feedback.pushInfo('Error: No features selected. Terminating.')
-            orig_routes.setSubsetString('')
+            orig_routes.setSubsetString(orig_qry)
             return results
+        else:
+            feedback.pushInfo(str(total_features) + ' features found.')
+            feedback.pushInfo('')
 
         network_layer = QgsProcessingUtils.mapLayerFromString(parameters['Network'], context=context)
         crs = network_layer.crs().authid()
 
-        feedback.pushInfo('CRS ='+crs)
+        feedback.pushInfo('CRS = '+crs)
 
         buffer = parameters['Buffer']
         strength = parameters['Strength']
@@ -131,7 +140,6 @@ class SnapSelectedRoutesToNetwork(QgsProcessingAlgorithm):
         outputs['JoinAttributesByLocation'] = processing.run('native:joinattributesbylocation', alg_params, context=context, is_child_algorithm=True)
 
         new_layer = []
-        buffer_layer = []
         counter = 1
 
         feedback.setProgress(1)
@@ -177,6 +185,7 @@ class SnapSelectedRoutesToNetwork(QgsProcessingAlgorithm):
             outputs['Speed'] = processing.run('native:fieldcalculator', alg_params, context=context, is_child_algorithm=True)
 
             try:
+
                 # Shortest path (point to point)
                 alg_params = {
                     'DEFAULT_DIRECTION': 2,
@@ -257,7 +266,8 @@ class SnapSelectedRoutesToNetwork(QgsProcessingAlgorithm):
         outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)
         
         # Clear the filter on the input layer
-        orig_routes.setSubsetString(orig_qry)
+        if not parameters['Filter']:
+            orig_routes.setSubsetString(orig_qry)
 
         return results
 

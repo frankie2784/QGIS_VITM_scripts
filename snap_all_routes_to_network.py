@@ -13,6 +13,7 @@ from qgis.core import QgsProcessingUtils
 from qgis.core import QgsFeatureRequest
 from qgis.core import QgsLineString, QgsMultiLineString
 import processing
+from qgis.utils import active_plugins
 import math
 
 
@@ -41,6 +42,8 @@ class SnapAllRoutesToNetwork(QgsProcessingAlgorithm):
         network_layer = QgsProcessingUtils.mapLayerFromString(parameters['Network'], context=context)
         crs = network_layer.crs().authid()
 
+        feedback.pushInfo('CRS = ' + crs)
+        
         buffer = parameters['Buffer']
         strength = parameters['Strength']
         route_id_field = parameters['RouteIDField']
@@ -105,8 +108,13 @@ class SnapAllRoutesToNetwork(QgsProcessingAlgorithm):
         features = routes_layer.getFeatures(request)
         
         total_features = routes_layer.featureCount()
-        feedback.pushInfo(str(total_features) + ' features found. Starting routing operation.')
-        feedback.pushInfo('')
+
+        if total_features == 0:
+            feedback.pushInfo('Error: No features found. Terminating.')
+            return results
+        else:
+            feedback.pushInfo(str(total_features) + ' features found. Starting routing operation.')
+            feedback.pushInfo('')
 
         new_layer = []
         counter = 1
@@ -141,19 +149,19 @@ class SnapAllRoutesToNetwork(QgsProcessingAlgorithm):
             
             feedback.pushInfo('Processing feature ' + str(counter) + ' of ' + str(total_features) + ': Route ID ' + route_id)
 
-            try:
-                # SPEED
-                alg_params = {
-                    'FIELD_LENGTH': 3,
-                    'FIELD_NAME': 'SPEED',
-                    'FIELD_PRECISION': 0,
-                    'FIELD_TYPE': 1,
-                    'FORMULA': 'if (origroute_fid = '+fid+', '+str(strength)+', 1)',
-                    'INPUT': outputs['JoinAttributesByLocation']['OUTPUT'],
-                    'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
-                }
-                outputs['Speed'] = processing.run('native:fieldcalculator', alg_params, context=context, is_child_algorithm=True)
+            # SPEED
+            alg_params = {
+                'FIELD_LENGTH': 3,
+                'FIELD_NAME': 'SPEED',
+                'FIELD_PRECISION': 0,
+                'FIELD_TYPE': 1,
+                'FORMULA': 'if (origroute_fid = '+fid+', '+str(strength)+', 1)',
+                'INPUT': outputs['JoinAttributesByLocation']['OUTPUT'],
+                'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+            }
+            outputs['Speed'] = processing.run('native:fieldcalculator', alg_params, context=context, is_child_algorithm=True)
 
+            try:
                 # Shortest path (point to point)
                 alg_params = {
                     'DEFAULT_DIRECTION': 2,
@@ -187,10 +195,14 @@ class SnapAllRoutesToNetwork(QgsProcessingAlgorithm):
 
                 new_layer.append(outputs['FieldCalculator']['OUTPUT'])
             except:
-                feedback.pushInfo('Something went wrong. Skipping feature '+str(counter))
+                feedback.pushInfo('The routing engine was unable to find a suitable route. Skipping feature ' + str(counter))
 
             counter += 1
             feedback.setProgress(math.ceil((float(counter) / float(total_features)) * 100))
+
+        if len(new_layer) == 0:
+            feedback.pushInfo('Error: No features in final output. Terminating process.')
+            return results
 
         # Merge vector layers
         alg_params = {
