@@ -757,10 +757,10 @@ class GenerateNodeSequenceFromSelectedLinks(QgsProcessingAlgorithm):
         return results
 
     def name(self):
-        return 'Generate node sequence from selected links (v3)'
+        return 'Generate node sequence from selected links (v2)'
 
     def displayName(self):
-        return 'Generate node sequence from selected links (v3)'
+        return 'Generate node sequence from selected links (v2)'
 
     def group(self):
         return ''
