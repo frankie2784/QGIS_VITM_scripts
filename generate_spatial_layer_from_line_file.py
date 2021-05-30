@@ -77,7 +77,7 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
         with open(line_file, "r") as f:
             linefile = f.read().split('\n')
 
-        lines = QgsVectorLayer("LineString?crs="+crs+"&field=route_id:string&field=mode:integer&index=no","Lines","memory")
+        lines = QgsVectorLayer("LineString?crs="+crs+"&field=route_id:string&field=mode:integer&field=name:string&field=headway_AM:integer&field=headway_IP:integer&field=headway_PM:integer&field=headway_OP:integer&index=no","Lines","memory")
         pr = lines.dataProvider()
 
         rows_processed = 0
@@ -91,12 +91,14 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
             missing_nodes = []
             missing_links = []
             invalid_links = []
-            ind = [i for i in range(len(line)) if line.startswith('"', i)][:2]
+            ind = [i for i in range(len(line)) if line.startswith('"', i)]
             if len(ind) != 0:
                 route_id = line[ind[0] + 1 : ind[1]]
                 node_list = []
                 new_nodes = line[line.find('N=') + 2 :].split(',')
                 mode = line[line.find('MODE=')+5:].split(',')[0]
+                name = line[ind[2] + 1 : ind[3]]
+                headways = [line[line.find('HEADWAY['+str(per)+']=')+11:].split(',')[0] for per in range(1,5)]
                 for j in range(len(new_nodes)-1,-1,-1):
                     if new_nodes[j].startswith('N='):
                         new_nodes[j] = new_nodes[j][2:]
@@ -124,7 +126,7 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
                 try:
                     feature = QgsFeature()
                     feature.setGeometry(QgsGeometry.fromPolyline(new_nodes))
-                    feature.setAttributes([route_id,mode])
+                    feature.setAttributes([route_id,mode,name,*headways])
                     pr.addFeatures([feature])
                     lines.updateExtents()
                     missing_nodes_text = ' Route ' + route_id + ' imported excluding invalid nodes. Check for errors.'
@@ -160,7 +162,7 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
 
         feedback.pushInfo('Processed ' + str(rows_processed) + ' / ' + str(total_rows) + ' lines')
         feedback.pushInfo('')
-
+        
         QgsProject.instance().addMapLayer(lines)
 
         # Merge vector layers
@@ -171,9 +173,17 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
         }
         outputs['MergeVectorLayers'] = processing.run('native:mergevectorlayers', alg_params, context=context, is_child_algorithm=True)
 
+        # Drop field(s)
+        alg_params = {
+            'COLUMN': ['layer','path'],
+            'INPUT': outputs['MergeVectorLayers']['OUTPUT'],
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        outputs['DropFields'] = processing.run('native:deletecolumn', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+
         # Load layer into project
         alg_params = {
-            'INPUT': outputs['MergeVectorLayers']['OUTPUT'],
+            'INPUT': outputs['DropFields']['OUTPUT'],
             'NAME': 'LINE import'
         }
         outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)
