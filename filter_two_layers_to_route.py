@@ -13,11 +13,11 @@ from qgis.utils import iface
 class FilterTwoLayersToRoute(QgsProcessingAlgorithm):
     
     def initAlgorithm(self, config=None):
-        self.addParameter(QgsProcessingParameterVectorLayer('Layer1', 'Layer 1', types=[QgsProcessing.TypeVectorLine], defaultValue='NEL_routes'))
-        self.addParameter(QgsProcessingParameterField('RouteIDLayer1', 'Route ID field - Layer 1', type=QgsProcessingParameterField.Any, parentLayerParameterName='Layer1', allowMultiple=False, defaultValue='ROUTESHTNM'))
+        self.addParameter(QgsProcessingParameterVectorLayer('Layer1', 'Layer 1', types=[QgsProcessing.TypeVectorLine], defaultValue=None))
+        self.addParameter(QgsProcessingParameterField('RouteIDLayer1', 'Route ID field - Layer 1', type=QgsProcessingParameterField.Any, parentLayerParameterName='Layer1', allowMultiple=False, defaultValue=None))
         self.addParameter(QgsProcessingParameterVectorLayer('Layer2', 'Layer 2', types=[QgsProcessing.TypeVectorLine], defaultValue='LINE import'))
         self.addParameter(QgsProcessingParameterField('RouteIDLayer2', 'Route ID field - Layer 2', type=QgsProcessingParameterField.Any, parentLayerParameterName='Layer2', allowMultiple=False, defaultValue='route_id'))
-        self.addParameter(QgsProcessingParameterString('RouteID', 'Route ID', multiLine=False, defaultValue=''))
+        self.addParameter(QgsProcessingParameterString('RouteID', 'Route ID', multiLine=False, defaultValue=None))
 
     def processAlgorithm(self, parameters, context, model_feedback):
         feedback = QgsProcessingMultiStepFeedback(1, model_feedback)
@@ -45,7 +45,7 @@ class FilterTwoLayersToRoute(QgsProcessingAlgorithm):
                     else:
                         break
                 except:
-                    None
+                    continue
 
         if sum(layer_features) == 0:
             feedback.pushInfo('Error: No routes found. Please ensure the route you entered is valid and available in the selected layers.')
