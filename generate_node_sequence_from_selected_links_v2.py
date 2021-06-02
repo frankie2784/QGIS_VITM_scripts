@@ -276,6 +276,7 @@ def find_most_likely_path(orig_node, dest_node, traversed_paths, route_shortest_
             # print('\nnew segment',current_node,'to',next_node)
         else:
             if current_node not in route_shortest_path[:-1]:
+                None
                 # print('\nsearching past',current_node)
             else:
                 continue
