@@ -214,7 +214,7 @@ class Model(QgsProcessingAlgorithm):
         feedback.pushInfo('Total: ' + str(len(routes_not_in_VITM)))
         feedback.pushInfo('')        
 
-        feedback.pushInfo('Total VITM routes not found in GTFS:')
+        feedback.pushInfo('VITM routes not found in GTFS:')
         feedback.pushInfo(', '.join(sorted(routes_not_in_GTFS)))
         feedback.pushInfo('Total: ' + str(len(routes_not_in_GTFS)))
         feedback.pushInfo('')
