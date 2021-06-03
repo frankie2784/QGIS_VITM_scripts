@@ -5,23 +5,30 @@ Group :
 With QGIS : 31802
 """
 
-from qgis.core import QgsProcessing, QgsProcessingUtils
+from qgis.core import QgsProject
+from qgis.core import QgsProcessing
+from qgis.core import QgsProcessingUtils
 from qgis.core import QgsProcessingAlgorithm
 from qgis.core import QgsProcessingMultiStepFeedback
 from qgis.core import QgsProcessingParameterVectorLayer
 from qgis.core import QgsProcessingParameterNumber
+from qgis.core import QgsProcessingParameterString
 from qgis.core import QgsProcessingParameterFeatureSink
 from qgis.core import QgsCoordinateReferenceSystem
 import processing
 import math
+import pathlib
+import csv
 
 
 class Model(QgsProcessingAlgorithm):
 
     def initAlgorithm(self, config=None):
+        proj_path = QgsProject.instance().readPath("./")
         self.addParameter(QgsProcessingParameterVectorLayer('GTFSlayer', 'GTFS layer', types=[QgsProcessing.TypeVectorLine], defaultValue=None))
         self.addParameter(QgsProcessingParameterVectorLayer('LINElayer', 'LINE layer', types=[QgsProcessing.TypeVectorLine], defaultValue=None))
         self.addParameter(QgsProcessingParameterNumber('Tolerance', 'Tolerance (metres)', type=QgsProcessingParameterNumber.Integer, defaultValue=300))
+        self.addParameter(QgsProcessingParameterString('CSVOut', 'CSV results output', optional=True, multiLine=False, defaultValue=proj_path + '/output.csv'))
 
     def processAlgorithm(self, parameters, context, model_feedback):
         
@@ -30,6 +37,8 @@ class Model(QgsProcessingAlgorithm):
         outputs = {}
         
         tol = parameters['Tolerance']
+        csvOut = parameters['CSVOut']
+        csvOutData = [['Route', 'Score', 'Termini Matches']]
 
         feedback.pushInfo('Preparing inputs...')
         feedback.pushInfo('')
@@ -281,6 +290,14 @@ class Model(QgsProcessingAlgorithm):
                         ends_matched = clusterID
 
                 route_alignment_score[trueID] = {'ends':str(ends_matched),'route':str(round(100 * float(in_cluster) / float(total_points_along_route)))}
+                csvOutData.append([trueID, str(round(100 * float(in_cluster) / float(total_points_along_route))), str(ends_matched)])
+
+        if csvOut is not None:
+            folder = pathlib.Path(csvOut.rsplit('/',1)[0])
+            folder.mkdir(parents=True, exist_ok=True)
+            with open(csvOut, 'w', newline="") as f:
+                writer = csv.writer(f)
+                writer.writerows(csvOutData)
 
         feedback.pushInfo('Route alignment scores:')
         for route in sorted(route_alignment_score.keys()):
