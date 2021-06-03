@@ -90,7 +90,9 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
             not_imported = False
             missing_nodes = []
             missing_links = []
-            invalid_links = []
+            invalid_link_direction = []
+            repeated_nodes = []
+            invalid_linkc = {}
             ind = [i for i in range(len(line)) if line.startswith('"', i)]
             if len(ind) != 0:
                 route_id = line[ind[0] + 1 : ind[1]]
@@ -118,10 +120,22 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
 
                 node_list = node_list[::-1]
                 for j in range(len(node_list) - 1):
-                    if node_list[j + 1] not in all_links_dict[node_list[j]]:
-                        missing_links.append(str(node_list[j]) + '->' + str(node_list[j + 1]))
-                    elif all_links_dict[node_list[j]][node_list[j + 1]] in [-1, 1, 45, 46]:
-                        invalid_links.append(str(node_list[j]) + '->' + str(node_list[j + 1])+': LINKCLASS='+str(all_links_dict[node_list[j]][node_list[j + 1]]))
+                    if node_list[j + 1] == node_list[j]:
+                        if str(node_list[j]) not in repeated_nodes:
+                            repeated_nodes.append(str(node_list[j]))
+                    elif node_list[j + 1] not in all_links_dict[node_list[j]]:
+                        if node_list[j] not in all_links_dict[node_list[j + 1]]:
+                            missing_links.append('A:'+str(node_list[j]) + ',B:' + str(node_list[j + 1]))
+                        else:
+                            if len(invalid_link_direction) == 0 or invalid_link_direction[-1][-1] != str(node_list[j]):
+                                invalid_link_direction.append([str(node_list[j]),str(node_list[j + 1])])
+                            else:
+                                invalid_link_direction[-1] = invalid_link_direction[-1].append(str(node_list[j + 1]))
+                    elif all_links_dict[node_list[j]][node_list[j + 1]] in [1, 45, 46]:
+                        if str(all_links_dict[node_list[j]][node_list[j + 1]]) not in invalid_linkc:
+                            invalid_linkc[str(all_links_dict[node_list[j]][node_list[j + 1]])] = [str(node_list[j]) + ',' + str(node_list[j + 1])]
+                        else:
+                            invalid_linkc[str(all_links_dict[node_list[j]][node_list[j + 1]])].append(str(node_list[j]) + ',' + str(node_list[j + 1]))
 
                 try:
                     feature = QgsFeature()
@@ -130,12 +144,16 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
                     pr.addFeatures([feature])
                     lines.updateExtents()
                     missing_nodes_text = ' Route ' + route_id + ' imported excluding invalid nodes. Check for errors.'
-                    missing_links_text = ' Check for errors on route ' + route_id + '.'
-                    invalid_links_text = ' Check for errors on route ' + route_id + '.'
+                    missing_links_text = ' Check for missing links on route ' + route_id + '.'
+                    repeated_nodes_text = ' Check for repeated nodes on route ' + route_id + '.'
+                    invalid_link_direction_text = ' Check for invalid link directions on route ' + route_id + '.'
+                    invalid_linkc_text = ' Check for invalid LINKCLASS on route ' + route_id + '.'
                 except:
                     missing_nodes_text = ''
                     missing_links_text = ''
-                    invalid_links_text = ''
+                    repeated_nodes_text = ''
+                    invalid_link_direction_text = ''
+                    invalid_linkc_text = ''
                     not_imported = True
                 
                 if len(missing_nodes) > 0:
@@ -143,14 +161,26 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
                     errors.append('Invalid nodes: ' + ', '.join(missing_nodes))
                     errors.append('')
 
-                if len(missing_links) > 0:
-                    errors.append('Error: Invalid link(s) found on row ' + str(rows_processed) + '.' + missing_links_text)
-                    errors.append('Invalid links: ' + ', '.join(missing_links))
+                if len(invalid_link_direction) > 0:
+                    errors.append('Error: Link(s) with invalid direction found on row ' + str(rows_processed) + '.' + invalid_link_direction_text)
+                    for seq in invalid_link_direction:
+                        errors.append('Invalid sequence: ' + ','.join(invalid_link_direction[seq]))
                     errors.append('')
 
-                if len(invalid_links) > 0 :
-                    errors.append('Error: Link(s) with invalid LINKCLASS found on row ' + str(rows_processed) + '.' + missing_links_text)
-                    errors.append('Invalid links: ' + ', '.join(invalid_links))
+                if len(repeated_nodes) > 0:
+                    errors.append('Error: Adjacent repeated nodes found on row ' + str(rows_processed) + '.' + repeated_nodes_text)
+                    errors.append('Repeated nodes: ' + ','.join(repeated_nodes))
+                    errors.append('')
+                    
+                if len(missing_links) > 0:
+                    errors.append('Error: Missing link(s) found on row ' + str(rows_processed) + '.' + missing_links_text)
+                    errors.append('Missing links: ' + '/'.join(missing_links))
+                    errors.append('')
+
+                if len(invalid_linkc) > 0 :
+                    errors.append('Error: Link(s) with an invalid LINKCLASS found on row ' + str(rows_processed) + '.' + missing_linkc_text)
+                    for invalid_class in invalid_linkc:
+                        errors.append('Invalid LINKCLASS '+invalid_class+': ' + '/'.join(invalid_linkc[invalid_class]))
                     errors.append('')                    
             
                 if not_imported:
@@ -179,7 +209,7 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
             'INPUT': outputs['MergeVectorLayers']['OUTPUT'],
             'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
         }
-        outputs['DropFields'] = processing.run('native:deletecolumn', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+        outputs['DropFields'] = processing.run('native:deletecolumn', alg_params, context=context, is_child_algorithm=True)
 
         # Load layer into project
         alg_params = {
