@@ -101,7 +101,7 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
                 mode = line[line.find('MODE=')+5:].split(',')[0]
                 name = line[ind[2] + 1 : ind[3]]
                 headways = [line[line.find('HEADWAY['+str(per)+']=')+11:].split(',')[0] for per in range(1,5)]
-                for j in range(len(new_nodes)-1,-1,-1):
+                for j in reversed(range(len(new_nodes))):
                     if new_nodes[j].startswith('N='):
                         new_nodes[j] = new_nodes[j][2:]
                     if new_nodes[j].startswith('-'):
