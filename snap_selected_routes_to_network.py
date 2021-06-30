@@ -64,10 +64,10 @@ class SnapSelectedRoutesToNetwork(QgsProcessingAlgorithm):
 
         orig_qry = orig_routes.subsetString()
         if not parameters['Filter']:
-            if len(orig_qry) > 0:
-                orig_routes.setSubsetString('(' + orig_qry + ') AND uniqueID IN (' + ','.join(fids) + ')')
+           if len(orig_qry) > 0:
+               orig_routes.setSubsetString('(' + orig_qry + ') AND uniqueID IN (' + ','.join(fids) + ')')
         else:
-            orig_routes.setSubsetString('uniqueID IN (' + ','.join(fids) + ')')
+           orig_routes.setSubsetString('uniqueID IN (' + ','.join(fids) + ')')
         
         orig_routes.removeSelection()
         total_features = orig_routes.featureCount()
@@ -112,6 +112,8 @@ class SnapSelectedRoutesToNetwork(QgsProcessingAlgorithm):
         }
         outputs['ReprojectLayer'] = processing.run('native:reprojectlayer', alg_params, context=context, is_child_algorithm=True)
 
+        reporojected_routes_layer = QgsProcessingUtils.mapLayerFromString(outputs['ReprojectLayer']['OUTPUT'], context=context)
+
         # Buffer
         alg_params = {
             'DISSOLVE': False,
@@ -143,7 +145,7 @@ class SnapSelectedRoutesToNetwork(QgsProcessingAlgorithm):
         counter = 1
 
         feedback.setProgress(1)
-        for feat in orig_routes.getFeatures():
+        for feat in reporojected_routes_layer.getFeatures():
         
             fid = str(feat['uniqueID'])
             route_id = str(feat[route_id_field])

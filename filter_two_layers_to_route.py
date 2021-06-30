@@ -13,9 +13,9 @@ from qgis.utils import iface
 class FilterTwoLayersToRoute(QgsProcessingAlgorithm):
     
     def initAlgorithm(self, config=None):
-        self.addParameter(QgsProcessingParameterVectorLayer('Layer1', 'Layer 1', types=[QgsProcessing.TypeVectorLine], defaultValue=None))
+        self.addParameter(QgsProcessingParameterVectorLayer('Layer1', 'Layer 1', types=[QgsProcessing.TypeVectorAnyGeometry], defaultValue=None))
         self.addParameter(QgsProcessingParameterField('RouteIDLayer1', 'Route ID field - Layer 1', type=QgsProcessingParameterField.Any, parentLayerParameterName='Layer1', allowMultiple=False, defaultValue=None))
-        self.addParameter(QgsProcessingParameterVectorLayer('Layer2', 'Layer 2', types=[QgsProcessing.TypeVectorLine], defaultValue='LINE import'))
+        self.addParameter(QgsProcessingParameterVectorLayer('Layer2', 'Layer 2', types=[QgsProcessing.TypeVectorAnyGeometry], defaultValue='LINE import'))
         self.addParameter(QgsProcessingParameterField('RouteIDLayer2', 'Route ID field - Layer 2', type=QgsProcessingParameterField.Any, parentLayerParameterName='Layer2', allowMultiple=False, defaultValue='route_id'))
         self.addParameter(QgsProcessingParameterString('RouteID', 'Route ID', multiLine=False, defaultValue=None))
 

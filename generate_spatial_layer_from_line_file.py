@@ -14,7 +14,7 @@ from qgis.core import QgsPoint, QgsFeature, QgsGeometry, QgsVectorLayer
 from qgis.core import QgsLineString, QgsMultiLineString
 import processing
 import math
-        
+
 class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
 
     def initAlgorithm(self, config=None):
@@ -73,10 +73,10 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
             else:
                 if B not in all_links_dict[A]:
                     all_links_dict[A][B] = LINKCLASS
-
-        with open(line_file, "r") as f:
+        
+        with open(line_file, "r", encoding="utf-8") as f:
             linefile = f.read().split('\n')
-
+            
         lines = QgsVectorLayer("LineString?crs="+crs+"&field=route_id:string&field=mode:integer&field=name:string&field=headway_AM:integer&field=headway_IP:integer&field=headway_PM:integer&field=headway_OP:integer&index=no","Lines","memory")
         pr = lines.dataProvider()
 
@@ -109,7 +109,7 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
                     if not new_nodes[j].isdigit():
                         del new_nodes[j]
                         continue
-                    
+
                     try:
                         temp_node_coords = node_coords[new_nodes[j]]
                         node_list.append(new_nodes[j])
@@ -130,7 +130,7 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
                             if len(invalid_link_direction) == 0 or invalid_link_direction[-1][-1] != str(node_list[j]):
                                 invalid_link_direction.append([str(node_list[j]),str(node_list[j + 1])])
                             else:
-                                invalid_link_direction[-1] = invalid_link_direction[-1].append(str(node_list[j + 1]))
+                                invalid_link_direction[-1].append(str(node_list[j + 1]))
                     elif all_links_dict[node_list[j]][node_list[j + 1]] in [1, 45, 46]:
                         if str(all_links_dict[node_list[j]][node_list[j + 1]]) not in invalid_linkc:
                             invalid_linkc[str(all_links_dict[node_list[j]][node_list[j + 1]])] = [str(node_list[j]) + ',' + str(node_list[j + 1])]
@@ -164,7 +164,7 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
                 if len(invalid_link_direction) > 0:
                     errors.append('Error: Link(s) with invalid direction found on row ' + str(rows_processed) + '.' + invalid_link_direction_text)
                     for seq in invalid_link_direction:
-                        errors.append('Invalid sequence: ' + ','.join(invalid_link_direction[seq]))
+                        errors.append('Invalid sequence direction: ' + ','.join(seq))
                     errors.append('')
 
                 if len(repeated_nodes) > 0:
@@ -178,7 +178,7 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
                     errors.append('')
 
                 if len(invalid_linkc) > 0 :
-                    errors.append('Error: Link(s) with an invalid LINKCLASS found on row ' + str(rows_processed) + '.' + missing_linkc_text)
+                    errors.append('Error: Link(s) with an invalid LINKCLASS found on row ' + str(rows_processed) + '.' + invalid_linkc_text)
                     for invalid_class in invalid_linkc:
                         errors.append('Invalid LINKCLASS '+invalid_class+': ' + '/'.join(invalid_linkc[invalid_class]))
                     errors.append('')                    
@@ -214,7 +214,7 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
         # Load layer into project
         alg_params = {
             'INPUT': outputs['DropFields']['OUTPUT'],
-            'NAME': 'LINE import'
+            'NAME': 'LINE Routes import'
         }
         outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)
         

@@ -373,7 +373,7 @@ class GenerateNodeSequenceFromSelectedLinks(QgsProcessingAlgorithm):
     def initAlgorithm(self, config=None):
 
         proj_path = QgsProject.instance().readPath("./")
-        self.addParameter(QgsProcessingParameterVectorLayer('Links', 'Selected links layer', types=[QgsProcessing.TypeVectorLine], defaultValue='/Users/frankiemacbook/Documents/GitHub/VITM-ref-case-update/NEL routes/VITM-Links.gpkg|layername=VITM-Links'))
+        self.addParameter(QgsProcessingParameterVectorLayer('Links', 'Selected links layer', types=[QgsProcessing.TypeVectorLine], defaultValue='/Users/frankiemacbook/OneDrive - VicGov/GitHub/VITM-ref-case-update/NEL routes/VITM-Links.gpkg|layername=VITM-Links'))
         self.addParameter(QgsProcessingParameterString('Route', 'Route ID', optional=True, multiLine=False, defaultValue=None))
         self.addParameter(QgsProcessingParameterBoolean('Rail', 'Is rail route', defaultValue=False))
         self.addParameter(QgsProcessingParameterPoint('Origpoint', 'Identify route origin with mouse (click ... then click near beginning of route on the map)', optional=True, defaultValue=None))
@@ -573,7 +573,7 @@ class GenerateNodeSequenceFromSelectedLinks(QgsProcessingAlgorithm):
         if len(terminal_nodes) > 2 and \
             (all(o is None for o in [orig_node, orig_point]) or \
             all(d is None for d in [dest_node, dest_point])):
-            feedback.pushInfo('Error: This route has more than two terminii. Terminal nodes: '+','.join(str(node[0]) for node in terminal_nodes)+'. A unique route cannot be found. If the intended route includes diversions or loops, please identify both origin and destination nodes. If this appears to be an error, a redundant link may have been included. Please check selected links and try again.')
+            feedback.pushInfo('Error: This route has more than two terminii. Terminal nodes: '+','.join(str(node) for node in terminal_nodes)+'. A unique route cannot be found. If the intended route includes diversions or loops, please identify both origin and destination nodes. If this appears to be an error, a redundant link may have been included. Please check selected links and try again.')
             feedback.pushInfo('')
             return results
 
