@@ -11,19 +11,24 @@ from qgis.core import QgsProcessingParameterMapLayer
 from qgis.core import QgsProcessingParameterFile
 from qgis.core import QgsProcessingParameterEnum
 from qgis.core import QgsProcessingParameterString
+from qgis.core import QgsProcessingParameterNumber
 from qgis.core import QgsProcessingUtils
 from qgis.core import QgsCoordinateReferenceSystem
+from qgis.utils import active_plugins
 import processing
+import re
 
 
-class Model(QgsProcessingAlgorithm):
+class GTFStoLIN(QgsProcessingAlgorithm):
 
     def initAlgorithm(self, config=None):
         self.addParameter(QgsProcessingParameterMapLayer('GTFSNetwork', 'GTFS Network', defaultValue=None, types=[QgsProcessing.TypeVectorLine]))
         self.addParameter(QgsProcessingParameterMapLayer('SVITMNetwork', 'S-VITM Network', defaultValue=None, types=[QgsProcessing.TypeVectorLine]))
         self.addParameter(QgsProcessingParameterFile('HeadwayCSVFile', 'Headways', optional=True, behavior=QgsProcessingParameterFile.File, fileFilter='CSV Files (*.csv)', defaultValue=None))
         self.addParameter(QgsProcessingParameterEnum('TransportMode', 'Transport Mode', options=['Bus','Tram','Train'], allowMultiple=False, usesStaticStrings=False, defaultValue=[]))
-        self.addParameter(QgsProcessingParameterString('RouteSuffix', 'Route Suffix', multiLine=False, defaultValue='_'))
+        self.addParameter(QgsProcessingParameterString('RoutePrefix', 'Route Prefix', multiLine=False, defaultValue='MR_'))
+        self.addParameter(QgsProcessingParameterNumber('Buffer', 'Search buffer (metres)', type=QgsProcessingParameterNumber.Integer, defaultValue=20))
+        self.addParameter(QgsProcessingParameterNumber('Strength', 'Breadth search cost penalty (1-999), i.e. relative weight assigned to using links within buffer', type=QgsProcessingParameterNumber.Integer, minValue=1, maxValue=999, defaultValue=700))
 
     def processAlgorithm(self, parameters, context, model_feedback):
         # Use a multi-step feedback, so that individual child algorithm progress reports are adjusted for the
@@ -32,13 +37,18 @@ class Model(QgsProcessingAlgorithm):
         results = {}
         outputs = {}
         
+        #Check that required plugin is installed
+        if 'QNEAT3' not in active_plugins:
+            feedback.pushInfo('Error: \'QNEAT3\' plugin not found. Please ensure you this installed by going to Plugins -> Manage and Install Plugins.\n')
+            return results
+        
         #Load input layers into memory
         feedback.pushInfo('Loading input layers into memory...')
         gtfsLayer = QgsProcessingUtils.mapLayerFromString(parameters['GTFSNetwork'], context=context)
         vitmLayer = QgsProcessingUtils.mapLayerFromString(parameters['SVITMNetwork'], context=context)
         
         #Update filter for VITM network layer
-        feedback.pushInfo('Adjusting filters from VITM network layer...')
+        feedback.pushInfo('Done.\n\nAdjusting filters from VITM network layer...')
         vitmOrigQuery = vitmLayer.subsetString()
         feedback.pushInfo('Original filter: ' + vitmOrigQuery)
         switchBlock = {
@@ -49,23 +59,23 @@ class Model(QgsProcessingAlgorithm):
         vitmLayer.setSubsetString(switchBlock.get(parameters['TransportMode'], ''))
         
         #Check the input layers for lines (i.e. they aren't all filtered out)
-        feedback.pushInfo('Checking input layers for valid inputs...')
+        feedback.pushInfo('DOne.\n\nChecking input layers for valid inputs...')
         if gtfsLayer.featureCount() == 0:
             feedback.pushInfo('ERROR: No features found in GTFS input layer. exiting...')
             vitmLayer.setSubsetString(vitmOrigQuery)
-            return
+            return results
         if vitmLayer.featureCount() == 0:
             feedback.pushInfo('ERROR: No features found in VITM network layer. exiting...')
             vitmLayer.setSubsetString(vitmOrigQuery)
-            return
+            return results
         vitmReqAttr = ['A', 'B', 'LINKCLASS']
         if all( i in vitmLayer.attributeAliases() for i in vitmReqAttr):
-            feedback.pushInfo('Input layer checks passed.')
+            feedback.pushInfo('Done.\n')
         else:
-            feedback.pushInfo('ERROR: VITM network requires A, B and LINKCLASS attributes.')
+            feedback.pushInfo('ERROR: VITM network requires A, B and LINKCLASS attributes.\n')
             vitmLayer.setSubsetString(vitmOrigQuery)
             feedback.pushInfo('Available attributes: ' + ', '.join(vitmLayer.attributeAliases()))
-            return
+            return results
 
         # Reproject layer
         feedback.pushInfo('Reprojecting GTFS layer into VITM CRS...')
@@ -77,7 +87,73 @@ class Model(QgsProcessingAlgorithm):
             'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
         }
         outputs['ReprojectLayer'] = processing.run('native:reprojectlayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-        gtfsReprojected = outputs['ReprojectLayer']['OUTPUT']
+        
+        #Add the Route Shortname to the attribute table
+        alg_params = {
+            'FIELD_LENGTH': 0,
+            'FIELD_NAME': 'shortname',
+            'FIELD_PRECISION': 0,
+            'FIELD_TYPE': 2,  # String
+            'FORMULA': ' regexp_replace(\"route_id\",\'\\\\d+-([a-zA-Z0-9]+)-.+\',\'' + parameters['RoutePrefix'] + '\\\\1\')',
+            'INPUT': outputs['ReprojectLayer']['OUTPUT'],
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        outputs['AddShortname'] = processing.run('native:fieldcalculator', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+        
+        #Add the Line Lengths to the attribute table
+        alg_params = {
+            'FIELD_LENGTH': 0,
+            'FIELD_NAME': 'route_length',
+            'FIELD_PRECISION': 0,
+            'FIELD_TYPE': 1,  # Integer
+            'FORMULA': ' to_int( $length ) ',
+            'INPUT': outputs['AddShortname']['OUTPUT'],
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        outputs['AddLength'] = processing.run('native:fieldcalculator', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+        
+        #Filter for longest line for each route
+        #Step 1: get the unique values available for route shortnames
+        #gtfsShortnameLayer = QgsProcessingUtils.mapLayerFromString(outputs['FieldCalculator']['OUTPUT'], context=context)
+        #gtfsShortnameList = gtfsShortnameLayer.uniqueValues(gtfsShortnameLayer.attributeAliases().index('shortname'))
+        #Step 2: extract the longest line for each shortname
+        alg_params = {
+            'EXPRESSION': ' if (to_int( $length ) = maximum( route_length, shortname), true, false) ',
+            'INPUT': outputs['AddLength']['OUTPUT'],
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        outputs['ExtractByExpression'] = processing.run('native:extractbyexpression', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+        
+        # Delete duplicates by attribute
+        alg_params = {
+            'FIELDS': ['shortname'],
+            'INPUT': outputs['ExtractByExpression']['OUTPUT'],
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        outputs['DeleteDuplicatesByAttribute'] = processing.run('native:removeduplicatesbyattribute', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+        
+        #DEBUG load layer
+        alg_params = {
+            'INPUT': outputs['DeleteDuplicatesByAttribute']['OUTPUT'],
+            'NAME': 'Debug Output'
+        }
+        outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)
+        
+        return results
+        
+        #Add the search buffer
+        feedback.pushInfo('Done.\n\nCreating search buffer...')
+        alg_params = {
+            'DISSOLVE': False,
+            'DISTANCE': parameters['Buffer'],
+            'END_CAP_STYLE': 0,
+            'INPUT': outputs['ReprojectLayer']['OUTPUT'],
+            'JOIN_STYLE': 0,
+            'MITER_LIMIT': 2,
+            'SEGMENTS': 5,
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        outputs['Buffer'] = processing.run('native:buffer', alg_params, context=context, is_child_algorithm=True)
         
         
         
@@ -93,7 +169,7 @@ class Model(QgsProcessingAlgorithm):
         return 'VITM'
 
     def groupId(self):
-        return ''
+        return 'VITM'
 
     def createInstance(self):
-        return Model()
+        return GTFStoLIN()
