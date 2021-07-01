@@ -48,7 +48,6 @@ class GTFStoLIN(QgsProcessingAlgorithm):
         feedback.pushInfo('Loading input layers into memory...')
         gtfsLayer = QgsProcessingUtils.mapLayerFromString(parameters['GTFSNetwork'], context=context)
         vitmLayer = QgsProcessingUtils.mapLayerFromString(parameters['SVITMNetwork'], context=context)
-        vitmLayerStr = parameters['SVITMNetwork']
         
         #Update filter for VITM network layer
         feedback.pushInfo('Done.\n\nAdjusting filters from VITM network layer...')
@@ -62,7 +61,7 @@ class GTFStoLIN(QgsProcessingAlgorithm):
         vitmLayer.setSubsetString(switchBlock.get(parameters['TransportMode'], ''))
         
         #Check the input layers for lines (i.e. they aren't all filtered out)
-        feedback.pushInfo('DOne.\n\nChecking input layers for valid inputs...')
+        feedback.pushInfo('Done.\n\nChecking input layers for valid inputs...')
         if gtfsLayer.featureCount() == 0:
             feedback.pushInfo('ERROR: No features found in GTFS input layer. exiting...')
             vitmLayer.setSubsetString(vitmOrigQuery)
@@ -79,6 +78,13 @@ class GTFStoLIN(QgsProcessingAlgorithm):
             vitmLayer.setSubsetString(vitmOrigQuery)
             feedback.pushInfo('Available attributes: ' + ', '.join(vitmLayer.attributeAliases()))
             return results
+
+        # Create spatial index on the VITM layer
+        feedback.pushInfo('Done.\n\nCreating spatial index...')
+        alg_params = {
+            'INPUT': parameters['SVITMNetwork']
+        }
+        outputs['SVITMSpatialIndex'] = processing.run('native:createspatialindex', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
         # Reproject layer
         feedback.pushInfo('Reprojecting GTFS layer into VITM CRS...')
@@ -158,8 +164,9 @@ class GTFStoLIN(QgsProcessingAlgorithm):
         
         #Commence pathfinding loop
         feedback.setProgress(1)
-        feedback.pushInfo('Done.\n\n\n\nCommencing pathfinding by route...')
+        feedback.pushInfo('Done.\n\n**********\n\nCommencing pathfinding by route...')
         strength = parameters['Strength']
+        output_layer = []
         for feat in gtfsLinesFeatures:
             
             line = feat.geometry().constGet()
@@ -191,6 +198,16 @@ class GTFStoLIN(QgsProcessingAlgorithm):
             
             feedback.pushInfo('Processing Route ID: ' + shortname)
             
+            #Extract S-VITM network only around the buffer feature
+            bbox = bufferFeature.geometry().boundingBox().buffered(1000)
+            alg_params = {
+                'CLIP': False,
+                'EXTENT': str(bbox.xMinimum()) + ',' + str(bbox.xMaximum()) + ',' + str(bbox.yMinimum()) + ',' + str(bbox.yMaximum()) + ' [' + vitmCRS.authid() + ']',
+                'INPUT': outputs['SVITMSpatialIndex']['OUTPUT'],
+                'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+            }
+            outputs['ExtractclipByExtent'] = processing.run('native:extractbyextent', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+            
             #Set score (speed) parameters
             wkt = bufferFeature.geometry().asWkt()
             alg_params = {
@@ -198,19 +215,112 @@ class GTFStoLIN(QgsProcessingAlgorithm):
             'FIELD_NAME': 'SPEED',
             'FIELD_PRECISION': 0,
             'FIELD_TYPE': 1,  # Integer
-            'FORMULA': 'if (within( $geometry, geom_from_wkt(\'' + wkt + '\')), ' + str(strength) + ', if( intersects( $geometry, geom_from_wkt( \'' + wkt + '\')), ' + str(strength / 5) + ', ' + str(strength / 10) + '))',
-            'INPUT': vitmLayerStr,
+            'FORMULA': 'if (within( $geometry, geom_from_wkt(\'' + wkt + '\')), ' + str(strength) + ', if( intersects( $geometry, geom_from_wkt( \'' + wkt + '\')), ' + str(strength / 10) + ', 1))',
+            'INPUT': outputs['ExtractclipByExtent']['OUTPUT'],
             'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
             }
             outputs['Speed'] = processing.run('native:fieldcalculator', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
         
-        #DEBUG load layer
+            try:
+                # Find inbound route (TODO: make end point closest point to CBD)
+                alg_params = {
+                    'DEFAULT_DIRECTION': 2,
+                    'DEFAULT_SPEED': 5,
+                    'DIRECTION_FIELD': '',
+                    'END_POINT': end_point,
+                    'ENTRY_COST_CALCULATION_METHOD': 0,
+                    'INPUT': outputs['Speed']['OUTPUT'],
+                    'SPEED_FIELD': 'SPEED',
+                    'START_POINT': start_point,
+                    'STRATEGY': 1,
+                    'TOLERANCE': 0,
+                    'VALUE_BACKWARD': '',
+                    'VALUE_BOTH': '',
+                    'VALUE_FORWARD': '',
+                    'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+                }
+                outputs['ShortestPathPointToPoint'] = processing.run('qneat3:shortestpathpointtopoint', alg_params, context=context, is_child_algorithm=True)
+                
+                # Add route parameters to the output
+                alg_params = {
+                    'FIELD_LENGTH': 20,
+                    'FIELD_NAME': 'shortname',
+                    'FIELD_PRECISION': 0,
+                    'FIELD_TYPE': 2, # String
+                    'FORMULA': '\'' + shortname + '\'',
+                    'INPUT': outputs['ShortestPathPointToPoint']['OUTPUT'],
+                    'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+                }
+                outputs['FieldCalculator'] = processing.run('native:fieldcalculator', alg_params, context=context, is_child_algorithm=True)
+                
+                # TODO: remove unneeded parameters
+                # TODO: Add N value list (not sure how)
+                # TODO: Determine score based on sqkm area of shape created by joining routes together
+                
+                #Append output to output list
+                output_layer.append(outputs['FieldCalculator']['OUTPUT'])
+                
+                # Find outbounr (return) route (TODO: make start point closest point to CBD)
+                alg_params = {
+                    'DEFAULT_DIRECTION': 2,
+                    'DEFAULT_SPEED': 5,
+                    'DIRECTION_FIELD': '',
+                    'END_POINT': start_point,
+                    'ENTRY_COST_CALCULATION_METHOD': 0,
+                    'INPUT': outputs['Speed']['OUTPUT'],
+                    'SPEED_FIELD': 'SPEED',
+                    'START_POINT': end_point,
+                    'STRATEGY': 1,
+                    'TOLERANCE': 0,
+                    'VALUE_BACKWARD': '',
+                    'VALUE_BOTH': '',
+                    'VALUE_FORWARD': '',
+                    'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+                }
+                outputs['ShortestPathPointToPoint'] = processing.run('qneat3:shortestpathpointtopoint', alg_params, context=context, is_child_algorithm=True)
+                
+                # Add route parameters to the output
+                alg_params = {
+                    'FIELD_LENGTH': 20,
+                    'FIELD_NAME': 'shortname',
+                    'FIELD_PRECISION': 0,
+                    'FIELD_TYPE': 2, # String
+                    'FORMULA': '\'' + shortname + 'R\'',
+                    'INPUT': outputs['ShortestPathPointToPoint']['OUTPUT'],
+                    'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+                }
+                outputs['FieldCalculator'] = processing.run('native:fieldcalculator', alg_params, context=context, is_child_algorithm=True)
+                
+                # TODO: remove unneeded parameters
+                # TODO: Add N value list (not sure how) 
+                # TODO: Determine score based on sqkm area of shape created by joining routes together
+                
+                #Append output to output list
+                output_layer.append(outputs['FieldCalculator']['OUTPUT'])
+                
+            except:
+                feedback.pushInfo('The routing engine was unable to find a suitable route. Skipping feature ' + str(counter))
+
+        #Make sure output has valid features
+        if len(output_layer) == 0:
+            feedback.pushInfo('Error: No features in final output. Terminating process.')
+            return results
+        
+        #Merge output_layer list into one vector layer
         alg_params = {
-            'INPUT': outputs['Speed']['OUTPUT'],
-            'NAME': 'Debug Output'
+            'CRS': vitmCRS,
+            'LAYERS': output_layer,
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        outputs['MergeVectorLayers'] = processing.run('native:mergevectorlayers', alg_params, context=context, is_child_algorithm=True)
+        
+        # Load layer into project
+        alg_params = {
+            'INPUT': outputs['MergeVectorLayers']['OUTPUT'],
+            'NAME': 'Snapped routes'
         }
         outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)
-        
+
         return results
 
     def name(self):
