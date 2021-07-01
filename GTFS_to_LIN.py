@@ -14,6 +14,8 @@ from qgis.core import QgsProcessingParameterString
 from qgis.core import QgsProcessingParameterNumber
 from qgis.core import QgsProcessingUtils
 from qgis.core import QgsCoordinateReferenceSystem
+from qgis.core import QgsFeatureRequest
+from qgis.core import QgsLineString, QgsMultiLineString
 from qgis.utils import active_plugins
 import processing
 import re
@@ -46,6 +48,7 @@ class GTFStoLIN(QgsProcessingAlgorithm):
         feedback.pushInfo('Loading input layers into memory...')
         gtfsLayer = QgsProcessingUtils.mapLayerFromString(parameters['GTFSNetwork'], context=context)
         vitmLayer = QgsProcessingUtils.mapLayerFromString(parameters['SVITMNetwork'], context=context)
+        vitmLayerStr = parameters['SVITMNetwork']
         
         #Update filter for VITM network layer
         feedback.pushInfo('Done.\n\nAdjusting filters from VITM network layer...')
@@ -89,6 +92,7 @@ class GTFStoLIN(QgsProcessingAlgorithm):
         outputs['ReprojectLayer'] = processing.run('native:reprojectlayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
         
         #Add the Route Shortname to the attribute table
+        feedback.pushInfo('Done.\n\nExtracting route shortnames...')
         alg_params = {
             'FIELD_LENGTH': 0,
             'FIELD_NAME': 'shortname',
@@ -101,6 +105,7 @@ class GTFStoLIN(QgsProcessingAlgorithm):
         outputs['AddShortname'] = processing.run('native:fieldcalculator', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
         
         #Add the Line Lengths to the attribute table
+        feedback.pushInfo('Done.\n\nExteracting line lengths...')
         alg_params = {
             'FIELD_LENGTH': 0,
             'FIELD_NAME': 'route_length',
@@ -113,10 +118,7 @@ class GTFStoLIN(QgsProcessingAlgorithm):
         outputs['AddLength'] = processing.run('native:fieldcalculator', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
         
         #Filter for longest line for each route
-        #Step 1: get the unique values available for route shortnames
-        #gtfsShortnameLayer = QgsProcessingUtils.mapLayerFromString(outputs['FieldCalculator']['OUTPUT'], context=context)
-        #gtfsShortnameList = gtfsShortnameLayer.uniqueValues(gtfsShortnameLayer.attributeAliases().index('shortname'))
-        #Step 2: extract the longest line for each shortname
+        feedback.pushInfo('Done.\n\nExteracting longest lines by route...')
         alg_params = {
             'EXPRESSION': ' if (to_int( $length ) = maximum( route_length, shortname), true, false) ',
             'INPUT': outputs['AddLength']['OUTPUT'],
@@ -132,30 +134,82 @@ class GTFStoLIN(QgsProcessingAlgorithm):
         }
         outputs['DeleteDuplicatesByAttribute'] = processing.run('native:removeduplicatesbyattribute', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
         
-        #DEBUG load layer
-        alg_params = {
-            'INPUT': outputs['DeleteDuplicatesByAttribute']['OUTPUT'],
-            'NAME': 'Debug Output'
-        }
-        outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)
-        
-        return results
-        
         #Add the search buffer
         feedback.pushInfo('Done.\n\nCreating search buffer...')
         alg_params = {
             'DISSOLVE': False,
             'DISTANCE': parameters['Buffer'],
             'END_CAP_STYLE': 0,
-            'INPUT': outputs['ReprojectLayer']['OUTPUT'],
+            'INPUT': outputs['DeleteDuplicatesByAttribute']['OUTPUT'],
             'JOIN_STYLE': 0,
             'MITER_LIMIT': 2,
             'SEGMENTS': 5,
             'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
         }
-        outputs['Buffer'] = processing.run('native:buffer', alg_params, context=context, is_child_algorithm=True)
+        outputs['BufferedGTFS'] = processing.run('native:buffer', alg_params, context=context, is_child_algorithm=True)
         
+        #Convert routes to feature lists
+        sortRequest = QgsFeatureRequest()
+        sortRequest.setOrderBy(QgsFeatureRequest.OrderBy([QgsFeatureRequest.OrderByClause('shortname', ascending=True)]))
+        gtfsBuffered = QgsProcessingUtils.mapLayerFromString(outputs['BufferedGTFS']['OUTPUT'], context=context)
+        gtfsBufferedFeatures = gtfsBuffered.getFeatures(sortRequest)
+        gtfsLines = QgsProcessingUtils.mapLayerFromString(outputs['DeleteDuplicatesByAttribute']['OUTPUT'], context=context)
+        gtfsLinesFeatures = gtfsLines.getFeatures(sortRequest)
         
+        #Commence pathfinding loop
+        feedback.setProgress(1)
+        feedback.pushInfo('Done.\n\n\n\nCommencing pathfinding by route...')
+        strength = parameters['Strength']
+        for feat in gtfsLinesFeatures:
+            
+            line = feat.geometry().constGet()
+            shortname = str(feat['shortname'])
+            gtfsBuffered.setSubsetString('"shortname" = \'' + shortname + '\'')
+            for f in gtfsBuffered.getFeatures():
+                bufferFeature = f
+            
+            #Get endpoints of route
+            if type(line) == QgsLineString:
+                # Assume LineString
+                start_point = str(line[0].x()) + ',' + str(line[0].y())
+                end_point = str(line[-1].x()) + ',' + str(line[-1].y())
+            elif type(line) == QgsMultiLineString:
+                # Found MultiLineString
+                linestring_count = 0
+                for l in line:
+                    if linestring_count == 0:
+                        start_point = str(l[0].x()) + ',' + str(l[0].y())
+                    end_point = str(l[-1].x()) + ',' + str(l[-1].y())
+                    linestring_count += 1
+            else:
+                feedback.pushInfo('Invalid geometry for feature: Skipping route ID ' + shortname)
+                continue
+
+            if start_point == end_point:
+                feedback.pushInfo('Invalid geometry for feature: Skipping route ID ' + shortname)
+                continue
+            
+            feedback.pushInfo('Processing Route ID: ' + shortname)
+            
+            #Set score (speed) parameters
+            wkt = bufferFeature.geometry().asWkt()
+            alg_params = {
+            'FIELD_LENGTH': 0,
+            'FIELD_NAME': 'SPEED',
+            'FIELD_PRECISION': 0,
+            'FIELD_TYPE': 1,  # Integer
+            'FORMULA': 'if (within( $geometry, geom_from_wkt(\'' + wkt + '\')), ' + str(strength) + ', if( intersects( $geometry, geom_from_wkt( \'' + wkt + '\')), ' + str(strength / 5) + ', ' + str(strength / 10) + '))',
+            'INPUT': vitmLayerStr,
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+            }
+            outputs['Speed'] = processing.run('native:fieldcalculator', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+        
+        #DEBUG load layer
+        alg_params = {
+            'INPUT': outputs['Speed']['OUTPUT'],
+            'NAME': 'Debug Output'
+        }
+        outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)
         
         return results
 
