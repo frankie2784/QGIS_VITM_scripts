@@ -23,7 +23,7 @@ class Model(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterMapLayer('IntersectingLines', 'Intersecting Lines', defaultValue=None, types=[QgsProcessing.TypeVectorLine]))
         self.addParameter(QgsProcessingParameterNumber('MinimumIntersectionAngle', 'Minimum Intersection Angle', type=QgsProcessingParameterNumber.Double, minValue=0, maxValue=90, defaultValue=45))
         self.addParameter(QgsProcessingParameterDistance('MinimumIntersectingDistance', 'Minimum Intersecting Distance', parentParameterName='LineLayer', minValue=0, defaultValue=0))
-        self.addParameter(QgsProcessingParameterFeatureSink('OUTPUT', 'Segmented Lines', type=QgsProcessing.TypeVectorPoint, createByDefault=True, defaultValue=None))
+        self.addParameter(QgsProcessingParameterFeatureSink('OUTPUT', 'Segmented Lines', type=QgsProcessing.TypeVectorLine, createByDefault=True, defaultValue=None))
 
     def processAlgorithm(self, parameters, context, model_feedback):
         # Use a multi-step feedback, so that individual child algorithm progress reports are adjusted for the
@@ -38,6 +38,7 @@ class Model(QgsProcessingAlgorithm):
         for lineFeat in linesAsLayer.getFeatures():
             lineGeometry = lineFeat.geometry().constGet()
             lineGeometryEngine = QgsGeometry.createGeometryEngine(lineGeometry)
+            lineGeometryEngine.prepareGeometry()
             validInts = []
             
             feedback.pushInfo("Finding intersections along " + lineFeat['layer'])
