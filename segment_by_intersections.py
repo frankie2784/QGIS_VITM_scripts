@@ -12,8 +12,8 @@ from qgis.core import QgsProcessingParameterMapLayer
 from qgis.core import QgsProcessingParameterNumber
 from qgis.core import QgsProcessingParameterDistance
 from qgis.core import QgsProcessingParameterFeatureSink
-from qgis.core import QgsGeometry
-import processing
+from qgis.core import QgsGeometry, QgsPointXY
+import processing, math
 
 
 class Model(QgsProcessingAlgorithm):
@@ -32,35 +32,45 @@ class Model(QgsProcessingAlgorithm):
         results = {}
         outputs = {}
         
-        linesAsLayer = QgsProcessingUtils.mapLayerFromString(parameters['LineLayer'], context=context)
         intersectingAsLayer = QgsProcessingUtils.mapLayerFromString(parameters['IntersectingLines'], context=context)
+        intersectingCRS = intersectingAsLayer.sourceCrs()
+        
+        # Reproject lines layer to same CRS as intersecting layer
+        alg_params = {
+            'INPUT': parameters['LineLayer'],
+            'OPERATION': '',
+            'TARGET_CRS': intersectingCRS,
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        outputs['LineLayer'] = processing.run('native:reprojectlayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+        linesAsLayer = QgsProcessingUtils.mapLayerFromString(outputs['LineLayer']['OUTPUT'], context=context)
         
         for lineFeat in linesAsLayer.getFeatures():
-            lineGeometry = lineFeat.geometry().constGet()
-            lineGeometryEngine = QgsGeometry.createGeometryEngine(lineGeometry)
+            lineGeometry = lineFeat.geometry()
+            lineGeometryEngine = QgsGeometry.createGeometryEngine(lineGeometry.constGet())
             lineGeometryEngine.prepareGeometry()
             validInts = []
             
             feedback.pushInfo("Finding intersections along " + lineFeat['layer'])
             for intFeat in intersectingAsLayer.getFeatures():
                 
-                intFeatGeometry = intFeat.geometry().constGet()
-                if lineGeometryEngine.intersects(intFeatGeometry):
+                intFeatGeometry = intFeat.geometry()
+                if lineGeometryEngine.intersects(intFeatGeometry.constGet()):
                     feedback.pushInfo("Found intersection.")
                     
                     # Get the intersection location(s)
-                    ints = lineGeometryEngine.intersection(intFeatGeometry)
+                    ints = lineGeometryEngine.intersection(intFeatGeometry.constGet())
                     
                     # Get the distance to the intersecting location
-                    lineDistInt = lineGeometryEngine.distance(ints)
-                    intDistLine = intFeatGeometry.distance(lineGeometry)
+                    lineDistInt = lineFeat.geometry().distance(QgsGeometry.fromPointXY(QgsPointXY(ints)))
+                    intDistLine = intFeat.geometry().distance(lineGeometry)
                     
                     # Get the angle of the lines at that location
-                    thetaLine = lineGeometryEngine.interpolateAngle(lineDistInt)
+                    thetaLine = lineGeometry.interpolateAngle(lineDistInt)
                     thetaInt = intFeatGeometry.interpolateAngle(intDistLine)
                     
                     # Determine the intersection angle
-                    theta = abs(thetaLine - thetaInt)*180/pi()
+                    theta = abs(thetaLine - thetaInt)*180/math.pi
                     if theta > 180:
                         theta = abs(180 - theta)
                     
