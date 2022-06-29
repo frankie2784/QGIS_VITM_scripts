@@ -373,16 +373,16 @@ class GenerateNodeSequenceFromSelectedLinks(QgsProcessingAlgorithm):
     def initAlgorithm(self, config=None):
 
         proj_path = QgsProject.instance().readPath("./")
-        self.addParameter(QgsProcessingParameterVectorLayer('Links', 'Selected links layer', types=[QgsProcessing.TypeVectorLine], defaultValue='/Users/frankiemacbook/OneDrive - VicGov/GitHub/VITM-ref-case-update/NEL routes/VITM-Links.gpkg|layername=VITM-Links'))
+        self.addParameter(QgsProcessingParameterVectorLayer('Links', 'Selected links layer', types=[QgsProcessing.TypeVectorLine], defaultValue=None))
         self.addParameter(QgsProcessingParameterString('Route', 'Route ID', optional=True, multiLine=False, defaultValue=None))
         self.addParameter(QgsProcessingParameterBoolean('Rail', 'Is rail route', defaultValue=False))
         self.addParameter(QgsProcessingParameterPoint('Origpoint', 'Identify route origin with mouse (click ... then click near beginning of route on the map)', optional=True, defaultValue=None))
         self.addParameter(QgsProcessingParameterNumber('Orignode', 'Or manually enter origin node (overrides field above)', type=QgsProcessingParameterNumber.Integer, optional=True, defaultValue=None))
         self.addParameter(QgsProcessingParameterPoint('Destpoint', 'Identify route destination using mouse', optional=True, defaultValue=None))
         self.addParameter(QgsProcessingParameterNumber('Destnode', 'Manually enter destination node', optional=True, type=QgsProcessingParameterNumber.Integer, defaultValue=None))
-        self.addParameter(QgsProcessingParameterBoolean('Reverse', 'Add reverse (R) route', defaultValue=True))
+        self.addParameter(QgsProcessingParameterBoolean('Reverse', 'Add reverse (R) route', defaultValue=False))
         self.addParameter(QgsProcessingParameterBoolean('Validate', 'Validate links', defaultValue=True))
-        self.addParameter(QgsProcessingParameterBoolean('Output', 'Output route as separate spatial layer and CSV', defaultValue=True))
+        self.addParameter(QgsProcessingParameterBoolean('Output', 'Output route as separate spatial layer and CSV', defaultValue=False))
         self.addParameter(QgsProcessingParameterString('Path', 'CSV layer output', optional=True, multiLine=False, defaultValue=proj_path + '/output.csv'))
             
     def processAlgorithm(self, parameters, context, model_feedback):
@@ -568,6 +568,41 @@ class GenerateNodeSequenceFromSelectedLinks(QgsProcessingAlgorithm):
         if len(connected_links) != len(undirected_links_dict):
             feedback.pushInfo('Error: This route is discontinuous. Terminal nodes: ' + ','.join(str(node) for node in terminal_nodes) + '. A unique route cannot be found. Please check selected links and try again.')
             feedback.pushInfo('')
+            # Create layer with result
+            uri = "Point?crs="+crs+"&field=id:integer""&index=yes"
+
+            mem_layer = QgsVectorLayer(uri,
+                                       'terminal_nodes',
+                                       'memory')
+
+            prov = mem_layer.dataProvider()
+
+            feats = [ QgsFeature() for i in range(len(terminal_nodes)) ]
+
+            for i, feat in enumerate(feats):
+                feat.setAttributes([terminal_nodes[i]])
+                feat.setGeometry(node_coords[terminal_nodes[i]])
+                prov.addFeatures([feat])
+                mem_layer.updateExtents()
+
+            QgsProject.instance().addMapLayer(mem_layer)
+            
+            # Merge vector layers
+            alg_params = {
+                'CRS': QgsCoordinateReferenceSystem(crs),
+                'LAYERS': ['terminal_nodes'],
+                'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+            }
+            outputs['MergeVectorLayers'] = processing.run('native:mergevectorlayers', alg_params, context=context, is_child_algorithm=True)
+            
+            # Load layer into project
+            alg_params = {
+                'INPUT': outputs['MergeVectorLayers']['OUTPUT'],
+                'NAME': 'Terminal nodes'
+            }
+            outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)
+            
+            QgsProject.instance().removeMapLayer(mem_layer.id())
             return results
         
         if len(terminal_nodes) > 2 and \
@@ -575,6 +610,41 @@ class GenerateNodeSequenceFromSelectedLinks(QgsProcessingAlgorithm):
             all(d is None for d in [dest_node, dest_point])):
             feedback.pushInfo('Error: This route has more than two terminii. Terminal nodes: '+','.join(str(node) for node in terminal_nodes)+'. A unique route cannot be found. If the intended route includes diversions or loops, please identify both origin and destination nodes. If this appears to be an error, a redundant link may have been included. Please check selected links and try again.')
             feedback.pushInfo('')
+            # Create layer with result
+            uri = "Point?crs="+crs+"&field=id:integer""&index=yes"
+
+            mem_layer = QgsVectorLayer(uri,
+                                       'terminal_nodes',
+                                       'memory')
+
+            prov = mem_layer.dataProvider()
+
+            feats = [ QgsFeature() for i in range(len(terminal_nodes)) ]
+
+            for i, feat in enumerate(feats):
+                feat.setAttributes([terminal_nodes[i]])
+                feat.setGeometry(node_coords[terminal_nodes[i]])
+                prov.addFeatures([feat])
+                mem_layer.updateExtents()
+
+            QgsProject.instance().addMapLayer(mem_layer)
+            
+            # Merge vector layers
+            alg_params = {
+                'CRS': QgsCoordinateReferenceSystem(crs),
+                'LAYERS': ['terminal_nodes'],
+                'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+            }
+            outputs['MergeVectorLayers'] = processing.run('native:mergevectorlayers', alg_params, context=context, is_child_algorithm=True)
+            
+            # Load layer into project
+            alg_params = {
+                'INPUT': outputs['MergeVectorLayers']['OUTPUT'],
+                'NAME': 'Terminal nodes'
+            }
+            outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)
+
+            QgsProject.instance().removeMapLayer(mem_layer.id())
             return results
 
         dist_orig_to_terminii = []
@@ -721,7 +791,7 @@ class GenerateNodeSequenceFromSelectedLinks(QgsProcessingAlgorithm):
                 'INPUT': outputs['MergeVectorLayers']['OUTPUT'],
                 'NAME': 'Imported LINE routes'
             }
-            outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)        
+            outputs['LoadLayerIntoProject'] = processing.run('native:loadlayer', alg_params, context=context, is_child_algorithm=True)
 
             QgsProject.instance().removeMapLayer(lines.id())
 
