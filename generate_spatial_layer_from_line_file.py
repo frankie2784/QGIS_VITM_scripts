@@ -310,13 +310,20 @@ class GenerateSpatialLayerFromLinesFile(QgsProcessingAlgorithm):
         if parameters['Aggregate']:
             # Aggregate
             alg_params = {
-                'AGGREGATES': [{'aggregate': 'first_value','delimiter': ',','input': '\"node\"','length': -1,'name': 'node','precision': 0,'type': 2},{'aggregate': 'sum','delimiter': ',','input': '\"services_AM\"','length': -1,'name': 'services_AM','precision': 0,'type': 2},{'aggregate': 'sum','delimiter': ',','input': '\"services_IP\"','length': -1,'name': 'services_IP','precision': 0,'type': 2},{'aggregate': 'sum','delimiter': ',','input': '\"services_PM\"','length': -1,'name': 'services_PM','precision': 0,'type': 2},{'aggregate': 'sum','delimiter': ',','input': '\"services_OP\"','length': -1,'name': 'services_OP','precision': 0,'type': 2},{'aggregate': 'sum','delimiter': ',','input': '\"services_All\"','length': -1,'name': 'services_All','precision': 0,'type': 2}],
-                'GROUP_BY': '\"node\"',
+                'AGGREGATES': [{'aggregate': 'first_value','delimiter': ',','input': '"node"','length': 255,'name': 'node','precision': 0,'type': 2},\
+                {'aggregate': 'sum','delimiter': ',','input': '"services_AM"','length': 255,'name': 'services_AM','precision': 0,'type': 2},\
+                {'aggregate': 'sum','delimiter': ',','input': '"services_IP"','length': 255,'name': 'services_IP','precision': 0,'type': 2},\
+                {'aggregate': 'sum','delimiter': ',','input': '"services_PM"','length': 255,'name': 'services_PM','precision': 0,'type': 2},\
+                {'aggregate': 'sum','delimiter': ',','input': '"services_OP"','length': 255,'name': 'services_OP','precision': 0,'type': 2},\
+                {'aggregate': 'sum','delimiter': ',','input': '"services_All"','length': 255,'name': 'services_All','precision': 0,'type': 2}],
+                'GROUP_BY': '"node"',
                 'INPUT': outputs['DropFields']['OUTPUT'],
                 'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
             }
             outputs['Aggregate'] = processing.run('native:aggregate', alg_params, context=context, is_child_algorithm=True)
 
+            feedback.pushInfo('Aggregated')
+            
             # Load layer into project
             alg_params = {
                 'INPUT': outputs['Aggregate']['OUTPUT'],
